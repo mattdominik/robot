@@ -16,4 +16,6 @@
 #define S4_PIN      38
 
 
+int read_Hex_Switch(void);
+
 #endif

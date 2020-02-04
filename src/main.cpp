@@ -5,31 +5,55 @@
 #include <ANSI.h>
 #include <shield.h>
 
-#define WAIT_SEC_AT_START 3
+
+
+#define ENC_PULSE_PER_ROT  280
+
+#define ENC1_PULSE_IN  21
+#define ENC2_PULSE_IN  20
+#define ENC3_PULSE_IN  2
+
+#define MOTOR1_PWM_OUT  3
+#define MOTOR2_PWM_OUT  4
+#define MOTOR3_PWM_OUT  5
+
+#define MOTOR1_DIR_OUT  
+#define MOTOR2_DIR_OUT  
+#define MOTOR3_DIR_OUT  
+
 
 #define ROBOT_LEFT  0x10
 #define ROBOT_RIGHT 0x11
 #define BIN_FERTIG  0x12
 
+volatile long enc1_Value;
+volatile long enc2_Value;
+volatile long enc3_Value;
+
+int rpm1 = 0;
+int rpm2 = 0;
+int rpm3 = 0;
+
 
 int address = 0;
-
 char buffer[50];
 
 char cmdbuffer[50];
-char cmd[50] = "bim\0"; 
+char cmd1[50] = "rechts\0"; 
+char cmd2[50] = "links\0"; 
+char cmd3[50] = "stop\0"; 
+char cmd4[50] = "fahr\0"; 
 
 int idx_buf = 0;
 
 void test(void);
 void pinger(unsigned char station, char command, unsigned char len, char *data);
 void fertig(unsigned char station, char command, unsigned char len, char *data);
-void read_Hex_Switch(void);
 
 void isr_S4(void);
-
-bool alive = true;
-int counter = 0;
+void updateEncoder1(void);
+void updateEncoder2(void);
+void updateEncoder3(void);
 
 CLI_COMMAND(helpFunc);
 CLI_COMMAND(connectFunc);
@@ -42,6 +66,12 @@ CLI_COMMAND(ble_renew);
 CLI_COMMAND(ble_type);
 CLI_COMMAND(icsc_status);
 CLI_COMMAND(reset);
+
+
+bool alive = true;
+int counter = 0;
+
+
 
 ANSI ansi;
 byte rx_byte = 0;        // stores received byte
@@ -61,23 +91,23 @@ void setup() {
   //     ansi.clr_line();
   // }
 
-  ansi.cls();
+    ansi.cls();
 
-  CLI.setDefaultPrompt("MASTER> ");
-  CLI.onConnect(connectFunc);
-  
-  CLI.addCommand("help", helpFunc);
-  CLI.addCommand("reset", reset);
-  CLI.addCommand("ble_send", ble_send);
-  CLI.addCommand("ble_status",ble_status);
-  CLI.addCommand("ble_addr",ble_addr);
-  CLI.addCommand("ble_connect",ble_connect);
-  CLI.addCommand("ble_renew",ble_renew);
-  CLI.addCommand("ble_type",ble_type);
-  CLI.addCommand("icsc_status",icsc_status);
-  CLI.addCommand("ble_set_name",ble_set_name);
+    CLI.setDefaultPrompt("MASTER> ");
+    CLI.onConnect(connectFunc);
+    
+    CLI.addCommand("help", helpFunc);
+    CLI.addCommand("reset", reset);
+    CLI.addCommand("ble_send", ble_send);
+    CLI.addCommand("ble_status",ble_status);
+    CLI.addCommand("ble_addr",ble_addr);
+    CLI.addCommand("ble_connect",ble_connect);
+    CLI.addCommand("ble_renew",ble_renew);
+    CLI.addCommand("ble_type",ble_type);
+    CLI.addCommand("icsc_status",icsc_status);
+    CLI.addCommand("ble_set_name",ble_set_name);
 
-  CLI.addClient(Serial);
+    CLI.addClient(Serial);
 
 
 
@@ -94,10 +124,19 @@ void setup() {
   pinMode(HEX2_PIN,INPUT);
   pinMode(HEX4_PIN,INPUT);
   pinMode(HEX8_PIN,INPUT);
-  read_Hex_Switch();
+  address = read_Hex_Switch();
 
-  pinMode(S4_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(S4_PIN), isr_S4, FALLING);
+  pinMode(ENC1_PULSE_IN, INPUT_PULLUP);
+  pinMode(ENC2_PULSE_IN, INPUT_PULLUP);
+  pinMode(ENC3_PULSE_IN, INPUT_PULLUP);
+
+  attachInterrupt(digitalPinToInterrupt(ENC1_PULSE_IN), updateEncoder1, RISING);
+  attachInterrupt(digitalPinToInterrupt(ENC2_PULSE_IN), updateEncoder2, RISING);
+  attachInterrupt(digitalPinToInterrupt(ENC3_PULSE_IN), updateEncoder3, RISING);
+
+
+
+
 
   // Serial.println("**********");
   // for(int i=0;i<10;i++)
@@ -138,6 +177,10 @@ void loop() {
     counter++;
     ts = millis();
 
+    rpm1 = (float)(enc1_Value * 60 / ENC_PULSE_PER_ROT);
+    rpm2 = (float)(enc2_Value * 60 / ENC_PULSE_PER_ROT);
+    rpm3 = (float)(enc3_Value * 60 / ENC_PULSE_PER_ROT);
+
 
     if(counter == 2)
     {
@@ -153,7 +196,7 @@ void loop() {
       digitalWrite(ETH1_LED_LEFT, LOW);
       //Serial.println("SEND PING");
       icsc.send(2, ICSC_SYS_PING, 5,"PING");
-      counter = 0;
+  //    counter = 0;
     } 
 
     // if(counter == 5)
@@ -171,41 +214,42 @@ void loop() {
   
 
 
-  read_Hex_Switch();
+  address = read_Hex_Switch();
 }
 
 void test()
 {
   
-  if(strcmp(cmdbuffer,cmd) == 0)
+  if(strcmp(cmdbuffer,cmd1) == 0)
   {
       icsc.send(2,ROBOT_LEFT,0);
     Serial.println("fahre rechts");
 
   }
+  else if(strcmp(cmdbuffer,cmd2) == 0)
+  {
+      icsc.send(2,ROBOT_LEFT,0);
+    Serial.println("fahre links");
+
+  }
+  else if(strcmp(cmdbuffer,cmd3) == 0)
+  {
+    Serial.println("STOP!!");
+  }
+  else if(strcmp(cmdbuffer,cmd4) == 0)
+  {
+    Serial.println("START");
+  }
+
   else
   {
+    sprintf(buffer,"CMD: %s",cmdbuffer);
+    Serial.println(buffer);
     Serial.println("kenne cmd nicht");
   }
   
 }
 
-
-void read_Hex_Switch(void)
-{
-  int hex=0;
-  
-  if(digitalRead(HEX1_PIN) == LOW)
-    hex = 1;
-  if(digitalRead(HEX2_PIN) == LOW)
-    hex += 1 << 1;
-  if(digitalRead(HEX4_PIN) == LOW)
-    hex += 1 << 2;
-  if(digitalRead(HEX8_PIN) == LOW)
-    hex += 1 << 3;
-
-  address = hex;
-}
 
 void pinger(unsigned char station, char command, unsigned char len, char *data)
 {
@@ -220,9 +264,17 @@ void fertig(unsigned char station, char command, unsigned char len, char *data)
   Serial.println("SLAVE ist fertig");
 }
 
-void isr_S4(void)
-{
-  Serial.println("Interrupt");
+
+void updateEncoder1(){
+  enc1_Value++;
+}
+
+void updateEncoder2(){
+  enc2_Value++;
+}
+
+void updateEncoder3(){
+  enc3_Value++;
 }
 
 
